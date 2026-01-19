@@ -1,4 +1,5 @@
-Graph Neural Network-Based Leukemia Detection System on AWS
+**Graph Neural Network-Based Leukemia Detection System on AWS**
+
 An end-to-end cloud-based medical imaging system leveraging Graph Neural Networks for automated classification of microscopic blood cell images into four leukemia stages: Benign, Early, Pre, and Pro. Deployed on AWS with real-time prediction capabilities.
 Overview
 This project demonstrates the application of Graph Neural Networks to medical image analysis. Unlike traditional CNNs, this approach represents images as graphs, capturing spatial relationships through spectral convolutions. The system achieves 84% test accuracy with 1-2 second inference latency.
