@@ -47,10 +47,7 @@ Python 3.9+
 AWS Account
 AWS CLI configured
 
-Local Setup
-bashgit clone https://github.com/yourusername/gnn-leukemia-detection.git
-cd gnn-leukemia-detection
-pip install -r requirements.txt
+
 AWS Deployment
 1. Create S3 Buckets:
 bashaws s3 mb s3://leukemia-dataset-project
@@ -90,27 +87,7 @@ Epochs: 25
 Loss: Weighted Negative Log-Likelihood
 Training time: ~45 minutes on t2.micro
 
-Inference via API
-Health Check:
-bashcurl http://your-ec2-ip:5000/health
-Prediction:
-bashcurl -X POST http://your-ec2-ip:5000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"image": "base64_encoded_image", "filename": "cell.jpg"}'
-Response:
-json{
-  "success": true,
-  "prediction": {
-    "predicted_class": "Early",
-    "confidence": 95.1,
-    "all_probabilities": {
-      "Benign": 3.2,
-      "Early": 95.1,
-      "Pre": 1.1,
-      "Pro": 0.7
-    }
-  }
-}
+
 Web Interface
 Access the web interface at: http://leukemia-detection-ui.s3-website-us-east-1.amazonaws.com
 Upload a microscopic blood cell image via drag-and-drop or file selection to receive instant classification results.
