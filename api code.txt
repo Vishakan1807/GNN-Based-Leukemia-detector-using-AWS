@@ -1,0 +1,478 @@
+# ============================================================================
+# IMPORTS SECTION
+# ============================================================================
+
+from flask import Flask, request, jsonify
+# Flask: Web framework for creating REST API
+# request: Access incoming HTTP request data
+# jsonify: Convert Python dict to JSON response
+
+from flask_cors import CORS
+# CORS: Cross-Origin Resource Sharing
+# Allows frontend (hosted on S3) to call API (hosted on EC2)
+# Without CORS, browser blocks requests between different domains
+
+import boto3
+# AWS SDK for Python
+# Used to interact with S3 (upload/download files)
+
+import base64
+# Encode/decode binary data to/from Base64 text format
+# Images sent from frontend are Base64 encoded
+
+import io
+# Input/Output operations in memory
+# Used to handle image bytes without saving to disk
+
+import json
+# JavaScript Object Notation
+# Parse and create JSON data
+
+from datetime import datetime
+# Get current timestamp for unique filenames
+
+import numpy as np
+# Numerical Python library
+# Array operations and mathematical functions
+
+from PIL import Image
+# Python Imaging Library (Pillow)
+# Open, manipulate, and process images
+
+import torch
+# PyTorch deep learning framework
+# Load and run neural network model
+
+import torch.nn.functional as F
+# PyTorch functional API
+# Activation functions (ReLU, Softmax, etc.)
+
+from torch_geometric.data import Data
+# PyTorch Geometric Data structure
+# Represents graph with nodes and edges
+
+from torch_geometric.nn import GCNConv
+# Graph Convolutional Network layer
+# Core building block of GNN
+
+import torch_geometric.nn
+# Additional PyTorch Geometric functions
+# Used for global pooling
+
+
+# ============================================================================
+# FLASK APP INITIALIZATION
+# ============================================================================
+
+app = Flask(__name__)
+# Create Flask application instance
+# __name__ tells Flask where to find templates/static files
+
+CORS(app)
+# Enable CORS for all routes
+# Allows frontend to make requests from different origin (S3 domain)
+
+
+# ============================================================================
+# AWS S3 CONFIGURATION
+# ============================================================================
+
+s3_client = boto3.client('s3')
+# Create S3 client using boto3
+# Automatically uses IAM role credentials (no hardcoded keys needed)
+# IAM role (LeukemiaEC2Role) provides temporary credentials
+
+MODEL_BUCKET = 'leukemia-results-project'
+# S3 bucket name where trained model is stored
+# Contains: models/leukemia_gnn_model_latest.pth
+
+MODEL_KEY = 'models/leukemia_gnn_model_latest.pth'
+# S3 object key (file path) for the trained model
+# Full path: s3://leukemia-results-project/models/leukemia_gnn_model_latest.pth
+
+UPLOADS_BUCKET = 'leukemia-user-uploads'
+# S3 bucket for storing user uploads and predictions
+# Structure: uploads/ and predictions/ folders
+
+
+# ============================================================================
+# CLASS NAMES
+# ============================================================================
+
+CLASS_NAMES = ['Benign', 'Early', 'Pre', 'Pro']
+# List of classification categories
+# Index 0 = Benign, Index 1 = Early, Index 2 = Pre, Index 3 = Pro
+# Used to convert numeric predictions to readable labels
+
+
+# ============================================================================
+# GNN MODEL DEFINITION
+# ============================================================================
+
+class GNN(torch.nn.Module):
+    """Graph Neural Network model definition."""
+    # Defines the architecture of our GNN
+    # Must match the architecture used during training
+    
+    def __init__(self, num_classes=4):
+        # Constructor: Initializes model layers
+        # num_classes=4 for Benign, Early, Pre, Pro
+        
+        super(GNN, self).__init__()
+        # Call parent class (torch.nn.Module) constructor
+        # Required for PyTorch models
+        
+        self.conv1 = GCNConv(1, 16)
+        # First Graph Convolutional layer
+        # Input: 1 feature per node (pixel intensity)
+        # Output: 16 features per node
+        
+        self.conv2 = GCNConv(16, 32)
+        # Second Graph Convolutional layer
+        # Input: 16 features per node (from conv1)
+        # Output: 32 features per node
+        
+        self.conv3 = GCNConv(32, 64)
+        # Third Graph Convolutional layer
+        # Input: 32 features per node (from conv2)
+        # Output: 64 features per node
+        
+        self.fc = torch.nn.Linear(64, num_classes)
+        # Fully connected layer
+        # Input: 64 features (from global pooling)
+        # Output: 4 class scores
+    
+    def forward(self, data):
+        # Forward pass: Defines how data flows through the network
+        # Called when you run: output = model(data)
+        
+        x, edge_index = data.x, data.edge_index
+        # Extract node features (x) and edge connections (edge_index)
+        # x shape: [num_nodes, 1] = [9216, 1]
+        # edge_index shape: [2, num_edges] = [2, 18432]
+        
+        x = F.relu(self.conv1(x, edge_index))
+        # Apply first graph convolution
+        # Then apply ReLU activation (max(0, x))
+        # Output shape: [9216, 16]
+        
+        x = F.dropout(x, p=0.3, training=self.training)
+        # Apply dropout with 30% probability
+        # Randomly sets 30% of values to 0 (only during training)
+        # self.training is True during training, False during inference
+        
+        x = F.relu(self.conv2(x, edge_index))
+        # Second graph convolution + ReLU
+        # Output shape: [9216, 32]
+        
+        x = F.dropout(x, p=0.3, training=self.training)
+        # Dropout again (30%)
+        
+        x = F.relu(self.conv3(x, edge_index))
+        # Third graph convolution + ReLU
+        # Output shape: [9216, 64]
+        
+        x = torch_geometric.nn.global_mean_pool(x, torch.zeros(x.size(0), dtype=torch.long))
+        # Global mean pooling: Average all node features
+        # Input: [9216, 64] (all nodes)
+        # Output: [64] (single graph representation)
+        # torch.zeros(...) creates batch assignment (all nodes in same batch)
+        
+        return F.log_softmax(self.fc(x), dim=1)
+        # Fully connected layer: [64] → [4]
+        # Log softmax: Convert to log probabilities
+        # Output: [log_prob_benign, log_prob_early, log_prob_pre, log_prob_pro]
+
+
+# ============================================================================
+# MODEL LOADING (HAPPENS ONCE AT STARTUP)
+# ============================================================================
+
+print("Loading model from S3...")
+# Print status message to console
+
+model_obj = s3_client.get_object(Bucket=MODEL_BUCKET, Key=MODEL_KEY)
+# Download model file from S3
+# get_object returns response with file data
+# Equivalent to: aws s3 cp s3://leukemia-results-project/models/leukemia_gnn_model_latest.pth
+
+model_bytes = model_obj['Body'].read()
+# Read the file content as bytes
+# model_bytes contains the entire .pth file in memory
+
+model = GNN(num_classes=4)
+# Create empty GNN model with random weights
+# Architecture defined, but weights not loaded yet
+
+model.load_state_dict(torch.load(io.BytesIO(model_bytes), map_location=torch.device('cpu')))
+# Load trained weights into model
+# torch.load(): Deserialize PyTorch model from bytes
+# io.BytesIO(): Convert bytes to file-like object
+# map_location='cpu': Load on CPU (no GPU on t2.micro)
+# load_state_dict(): Applies weights to model layers
+
+model.eval()
+# Set model to evaluation mode
+# Disables dropout and batch normalization
+# Required for inference (prediction)
+
+print("Model loaded successfully!")
+# Confirm model is ready
+
+
+# ============================================================================
+# IMAGE TO GRAPH CONVERSION FUNCTION
+# ============================================================================
+
+def image_to_graph(image_bytes):
+    """Convert image bytes to graph representation."""
+    # Function that transforms image into graph structure for GNN
+    
+    try:
+        # Try-except block to handle errors gracefully
+        
+        image = Image.open(io.BytesIO(image_bytes)).convert('L').resize((96, 96))
+        # Image.open(): Load image from bytes
+        # io.BytesIO(): Wrap bytes in file-like object
+        # .convert('L'): Convert to grayscale (L = Luminance)
+        # .resize((96, 96)): Resize to 96×96 pixels
+        
+        image_array = np.array(image) / 255.0
+        # Convert PIL Image to NumPy array
+        # Divide by 255 to normalize: 0-255 → 0.0-1.0
+        # Result: 96×96 array of float values
+        
+        height, width = image_array.shape
+        # Get dimensions: height=96, width=96
+        
+        data = Data()
+        # Create empty PyTorch Geometric Data object
+        # Will store node features and edge connections
+        
+        data.x = torch.tensor(image_array.flatten(), dtype=torch.float).view(-1, 1)
+        # image_array.flatten(): Convert 96×96 to 9216×1 array
+        # torch.tensor(): Convert NumPy array to PyTorch tensor
+        # dtype=torch.float: 32-bit floating point
+        # .view(-1, 1): Reshape to [9216, 1]
+        # Each row = one node with one feature (pixel intensity)
+        
+        # Create edges for the graph (4-connected grid)
+        edges = []
+        # Empty list to store edge pairs
+        
+        for i in range(height):  # Loop through rows (0 to 95)
+            for j in range(width):  # Loop through columns (0 to 95)
+                # For each pixel at position (i, j)
+                
+                if j < width - 1:
+                    # If not at right edge
+                    edges.append((i * width + j, i * width + (j + 1)))
+                    # Connect to right neighbor
+                    # Current node: i*96+j, Right node: i*96+(j+1)
+                    
+                if i < height - 1:
+                    # If not at bottom edge
+                    edges.append((i * width + j, (i + 1) * width + j))
+                    # Connect to bottom neighbor
+                    # Current node: i*96+j, Bottom node: (i+1)*96+j
+        
+        data.edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        # Convert edge list to tensor
+        # edges is list of tuples: [(0,1), (0,96), (1,2), ...]
+        # torch.tensor(): Convert to tensor
+        # dtype=torch.long: 64-bit integer (for indices)
+        # .t(): Transpose from [num_edges, 2] to [2, num_edges]
+        # .contiguous(): Ensure memory is contiguous (required by PyG)
+        # Final shape: [2, ~18432]
+        
+        return data
+        # Return Data object with x and edge_index
+        
+    except Exception as e:
+        # Catch any errors during processing
+        print(f"Error converting image to graph: {e}")
+        # Print error message
+        return None
+        # Return None to indicate failure
+
+
+# ============================================================================
+# HEALTH CHECK ENDPOINT
+# ============================================================================
+
+@app.route('/health', methods=['GET'])
+# Decorator: Register this function as endpoint
+# URL: http://52.66.196.187:5000/health
+# Method: GET only
+
+def health():
+    """Health check endpoint."""
+    # Simple endpoint to verify API is running
+    
+    return jsonify({'status': 'healthy', 'message': 'Leukemia Detection API is running'}), 200
+    # jsonify(): Convert dict to JSON response
+    # Returns: {"status": "healthy", "message": "..."}
+    # 200: HTTP status code (OK)
+
+
+# ============================================================================
+# PREDICTION ENDPOINT
+# ============================================================================
+
+@app.route('/predict', methods=['POST', 'OPTIONS'])
+# Register prediction endpoint
+# URL: http://52.66.196.187:5000/predict
+# Methods: POST (for predictions), OPTIONS (for CORS preflight)
+
+def predict():
+    """Prediction endpoint."""
+    # Main function that handles prediction requests
+    
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        # OPTIONS request sent by browser before actual POST
+        # Part of CORS protocol
+        return '', 204
+        # Return empty response with 204 (No Content)
+    
+    try:
+        # Try-except block for error handling
+        
+        # Get request data
+        data = request.get_json()
+        # Parse JSON body from HTTP request
+        # Example: {"image": "base64data...", "filename": "cell.jpg"}
+        
+        if not data or 'image' not in data:
+            # Validate that image field exists
+            return jsonify({'error': 'No image provided'}), 400
+            # 400: Bad Request (client error)
+        
+        # Decode base64 image
+        image_base64 = data['image']
+        # Extract Base64-encoded image string
+        
+        filename = data.get('filename', 'unknown.jpg')
+        # Extract filename, default to 'unknown.jpg' if not provided
+        
+        image_bytes = base64.b64decode(image_base64)
+        # Decode Base64 string to binary bytes
+        # Base64: Text representation of binary data
+        # Converts: "iVBORw0KGgo..." → actual image bytes
+        
+        # Save to S3 (optional - for record keeping)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Get current timestamp: 20241030_145623
+        
+        upload_key = f'uploads/{timestamp}_{filename}'
+        # Create S3 key: uploads/20241030_145623_cell.jpg
+        
+        s3_client.put_object(
+            Bucket=UPLOADS_BUCKET,
+            Key=upload_key,
+            Body=image_bytes,
+            ContentType='image/jpeg'
+        )
+        # Upload image to S3
+        # Bucket: leukemia-user-uploads
+        # Key: uploads/20241030_145623_cell.jpg
+        # Body: Image binary data
+        # ContentType: MIME type for proper rendering
+        
+        # Convert to graph
+        graph_data = image_to_graph(image_bytes)
+        # Call our function to convert image to graph
+        # Returns Data object with nodes and edges
+        
+        if graph_data is None:
+            # Check if conversion failed
+            return jsonify({'error': 'Failed to process image'}), 500
+            # 500: Internal Server Error
+        
+        # Make prediction
+        with torch.no_grad():
+            # Disable gradient computation (not needed for inference)
+            # Saves memory and computation
+            
+            output = model(graph_data)
+            # Run forward pass through GNN
+            # Input: Graph with 9216 nodes, 18432 edges
+            # Output: [4] log probabilities
+            
+            probabilities = torch.exp(output).squeeze().numpy()
+            # torch.exp(): Convert log probabilities to probabilities
+            # .squeeze(): Remove extra dimensions [1, 4] → [4]
+            # .numpy(): Convert PyTorch tensor to NumPy array
+            # Result: [0.032, 0.951, 0.011, 0.007] (example)
+            
+            predicted_class = int(np.argmax(probabilities))
+            # np.argmax(): Find index of maximum value
+            # int(): Convert to Python integer
+            # Example: argmax([0.032, 0.951, 0.011, 0.007]) = 1
+        
+        result = {
+            'predicted_class': CLASS_NAMES[predicted_class],
+            # Convert index to class name: CLASS_NAMES[1] = 'Early'
+            
+            'predicted_index': predicted_class,
+            # Keep numeric index: 1
+            
+            'confidence': float(probabilities[predicted_class]) * 100,
+            # Confidence of predicted class as percentage
+            # float(0.951) * 100 = 95.1
+            
+            'all_probabilities': {
+                CLASS_NAMES[i]: float(probabilities[i]) * 100 
+                for i in range(len(CLASS_NAMES))
+            }
+            # Dictionary with all class probabilities
+            # {'Benign': 3.2, 'Early': 95.1, 'Pre': 1.1, 'Pro': 0.7}
+        }
+        
+        # Save prediction result to S3
+        result_key = f'predictions/{timestamp}_{filename.split(".")[0]}_result.json'
+        # Create S3 key: predictions/20241030_145623_cell_result.json
+        
+        s3_client.put_object(
+            Bucket=UPLOADS_BUCKET,
+            Key=result_key,
+            Body=json.dumps(result, indent=2),
+            # Convert result dict to formatted JSON string
+            ContentType='application/json'
+        )
+        # Upload prediction to S3 for record keeping
+        
+        print(f"Prediction: {result['predicted_class']} ({result['confidence']:.2f}%)")
+        # Print to console for monitoring
+        # Example: "Prediction: Early (95.10%)"
+        
+        return jsonify({
+            'success': True,
+            'prediction': result,
+            's3_upload_key': upload_key
+        }), 200
+        # Return success response with prediction
+        # 200: OK
+        
+    except Exception as e:
+        # Catch any unexpected errors
+        print(f"Error in prediction: {e}")
+        # Print error to console
+        return jsonify({'error': str(e)}), 500
+        # Return error response
+        # 500: Internal Server Error
+
+
+# ============================================================================
+# RUN FLASK APP
+# ============================================================================
+
+if __name__ == '__main__':
+    # Only run if script is executed directly (not imported)
+    
+    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Start Flask development server
+    # host='0.0.0.0': Listen on all network interfaces (allows external access)
+    # port=5000: Listen on port 5000
+    # debug=True: Enable debug mode (auto-reload, detailed errors)
+    # Server runs continuously until stopped (Ctrl+C)

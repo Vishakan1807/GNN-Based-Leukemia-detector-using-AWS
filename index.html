@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leukemia Detection System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 via-white to-purple-50 min-h-screen">
+    
+    <!-- Header -->
+    <div class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 py-6">
+            <div class="flex items-center gap-3">
+                <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">Leukemia Detection System</h1>
+                    <p class="text-sm text-gray-600">AI-Powered Blood Cell Analysis using GNN</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            <!-- Upload Section -->
+            <div class="bg-white rounded-2xl shadow-lg p-8">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                    Upload Blood Cell Image
+                </h2>
+
+                <!-- Drag & Drop Area -->
+                <div id="dropZone" class="border-3 border-dashed border-gray-300 rounded-xl p-12 text-center transition-all hover:border-blue-400 hover:bg-gray-50 cursor-pointer">
+                    <div id="uploadPrompt" class="space-y-4">
+                        <svg class="w-16 h-16 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                        <div>
+                            <label class="cursor-pointer text-blue-600 hover:text-blue-700 font-semibold">
+                                Click to upload
+                                <input type="file" id="fileInput" class="hidden" accept="image/*">
+                            </label>
+                            <p class="text-gray-500 mt-1">or drag and drop</p>
+                        </div>
+                        <p class="text-sm text-gray-400">PNG, JPG, JPEG up to 10MB</p>
+                    </div>
+
+                    <div id="previewContainer" class="hidden space-y-4">
+                        <img id="preview" class="max-h-64 mx-auto rounded-lg shadow-md">
+                        <button onclick="resetUpload()" class="text-sm text-blue-600 hover:text-blue-700 underline">
+                            Choose different image
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Error Message -->
+                <div id="errorMessage" class="hidden mt-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                    <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-sm text-red-700" id="errorText"></p>
+                </div>
+
+                <!-- Analyze Button -->
+                <button id="analyzeBtn" onclick="analyzeImage()" disabled class="w-full mt-6 py-4 rounded-xl font-semibold text-white transition-all bg-gray-300 cursor-not-allowed">
+                    Analyze Image
+                </button>
+
+                <!-- Info Box -->
+                <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p class="text-sm text-blue-800">
+                        <strong>Note:</strong> Upload a microscopic image of blood cells. 
+                        The GNN model will classify it as Benign, Early, Pre, or Pro stage.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div class="bg-white rounded-2xl shadow-lg p-8">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    Analysis Results
+                </h2>
+
+                <div id="noResults" class="h-full flex items-center justify-center text-gray-400">
+                    <div class="text-center space-y-3">
+                        <svg class="w-16 h-16 mx-auto opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        <p>Upload an image to see results</p>
+                    </div>
+                </div>
+
+                <div id="loading" class="hidden h-full flex items-center justify-center">
+                    <div class="text-center space-y-4">
+                        <div class="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div>
+                        <p class="text-gray-600">Analyzing blood cells with GNN...</p>
+                    </div>
+                </div>
+
+                <div id="results" class="hidden space-y-6 fade-in"></div>
+            </div>
+        </div>
+
+        <!-- Info Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-8">
+            <div class="bg-green-100 text-green-800 rounded-xl p-4 text-center">
+                <p class="font-bold text-lg">Benign</p>
+                <p class="text-sm opacity-80">Normal healthy cells</p>
+            </div>
+            <div class="bg-yellow-100 text-yellow-800 rounded-xl p-4 text-center">
+                <p class="font-bold text-lg">Early</p>
+                <p class="text-sm opacity-80">Early stage indicators</p>
+            </div>
+            <div class="bg-orange-100 text-orange-800 rounded-xl p-4 text-center">
+                <p class="font-bold text-lg">Pre</p>
+                <p class="text-sm opacity-80">Pre-stage markers</p>
+            </div>
+            <div class="bg-red-100 text-red-800 rounded-xl p-4 text-center">
+                <p class="font-bold text-lg">Pro</p>
+                <p class="text-sm opacity-80">Advanced stage signs</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ IMPORTANT: Replace this IP with YOUR EC2 public IP address
+        const API_ENDPOINT = 'http://52.66.196.187:5000/predict';
+        
+        let selectedFile = null;
+
+        // File input handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            handleFileSelect(e.target.files[0]);
+        });
+
+        // Drag and drop handlers
+        const dropZone = document.getElementById('dropZone');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.add('border-blue-500', 'bg-blue-50');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', function(e) {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        }, false);
+
+        function handleFileSelect(file) {
+            if (!file) return;
+
+            if (!file.type.startsWith('image/')) {
+                showError('Please upload an image file');
+                return;
+            }
+
+            selectedFile = file;
+            hideError();
+
+            // Show preview
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('preview').src = e.target.result;
+                document.getElementById('uploadPrompt').classList.add('hidden');
+                document.getElementById('previewContainer').classList.remove('hidden');
+                
+                // Enable analyze button
+                const analyzeBtn = document.getElementById('analyzeBtn');
+                analyzeBtn.disabled = false;
+                analyzeBtn.classList.remove('bg-gray-300', 'cursor-not-allowed');
+                analyzeBtn.classList.add('bg-gradient-to-r', 'from-blue-600', 'to-purple-600', 'hover:from-blue-700', 'hover:to-purple-700', 'shadow-lg', 'hover:shadow-xl');
+            };
+            reader.readAsDataURL(file);
+
+            // Hide results
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('noResults').classList.remove('hidden');
+        }
+
+        function resetUpload() {
+            selectedFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('uploadPrompt').classList.remove('hidden');
+            document.getElementById('previewContainer').classList.add('hidden');
+            
+            // Disable analyze button
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            analyzeBtn.disabled = true;
+            analyzeBtn.classList.add('bg-gray-300', 'cursor-not-allowed');
+            analyzeBtn.classList.remove('bg-gradient-to-r', 'from-blue-600', 'to-purple-600', 'hover:from-blue-700', 'hover:to-purple-700', 'shadow-lg', 'hover:shadow-xl');
+            
+            hideError();
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('noResults').classList.remove('hidden');
+        }
+
+        async function analyzeImage() {
+            if (!selectedFile) {
+                showError('Please select an image first');
+                return;
+            }
+
+            // Show loading
+            document.getElementById('noResults').classList.add('hidden');
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+            hideError();
+
+            try {
+                // Convert to base64
+                const base64 = await fileToBase64(selectedFile);
+
+                // Call API
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image: base64.split(',')[1],
+                        filename: selectedFile.name
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.prediction) {
+                    displayResults(data.prediction);
+                } else {
+                    showError(data.error || 'Prediction failed');
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('noResults').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showError('Failed to connect to prediction service. Make sure Flask API is running on EC2.');
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('noResults').classList.remove('hidden');
+            }
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function displayResults(prediction) {
+            document.getElementById('loading').classList.add('hidden');
+            const resultsDiv = document.getElementById('results');
+            
+            const colorMap = {
+                'Benign': { bg: 'bg-green-100', border: 'border-green-500', text: 'text-green-800', bar: 'bg-green-500' },
+                'Early': { bg: 'bg-yellow-100', border: 'border-yellow-500', text: 'text-yellow-800', bar: 'bg-yellow-500' },
+                'Pre': { bg: 'bg-orange-100', border: 'border-orange-500', text: 'text-orange-800', bar: 'bg-orange-500' },
+                'Pro': { bg: 'bg-red-100', border: 'border-red-500', text: 'text-red-800', bar: 'bg-red-500' }
+            };
+
+            const colors = colorMap[prediction.predicted_class];
+            const icon = prediction.predicted_class === 'Benign' 
+                ? '<svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+                : '<svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+
+            const messages = {
+                'Benign': 'No signs of leukemia detected.',
+                'Early': 'Early stage leukemia indicators detected.',
+                'Pre': 'Pre-stage leukemia indicators detected.',
+                'Pro': 'Pro-stage leukemia indicators detected.'
+            };
+
+            let probHtml = '';
+            for (const [className, prob] of Object.entries(prediction.all_probabilities)) {
+                const c = colorMap[className];
+                probHtml += `
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-sm">
+                            <span class="font-medium text-gray-700">${className}</span>
+                            <span class="text-gray-600">${prob.toFixed(2)}%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="${c.bar} h-2 rounded-full transition-all" style="width: ${prob}%"></div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            resultsDiv.innerHTML = `
+                <div class="border-4 ${colors.border} ${colors.bg} ${colors.text} rounded-2xl p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-3">
+                            ${icon}
+                            <div>
+                                <p class="text-sm font-medium opacity-80">Classification</p>
+                                <p class="text-3xl font-bold">${prediction.predicted_class}</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-medium opacity-80">Confidence</p>
+                            <p class="text-3xl font-bold">${prediction.confidence.toFixed(1)}%</p>
+                        </div>
+                    </div>
+                    <p class="text-sm font-medium">${messages[prediction.predicted_class]}</p>
+                </div>
+
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-800 mb-3">Detailed Probabilities</h3>
+                    <div class="space-y-3">
+                        ${probHtml}
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p class="text-xs text-amber-800">
+                        <strong>Medical Disclaimer:</strong> This is an AI-based screening tool using Graph Neural Networks and should not replace professional medical diagnosis. 
+                        Please consult a healthcare professional for proper medical advice.
+                    </p>
+                </div>
+            `;
+
+            resultsDiv.classList.remove('hidden');
+        }
+
+        function showError(message) {
+            document.getElementById('errorText').textContent = message;
+            document.getElementById('errorMessage').classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
